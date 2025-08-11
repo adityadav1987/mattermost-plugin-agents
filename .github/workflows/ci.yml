@@ -10,6 +10,9 @@ on:
 permissions:
   contents: write
 
+env:
+  GO_VERSION: 1.24.0
+
 jobs:
   e2e:
     timeout-minutes: 60
@@ -18,8 +21,8 @@ jobs:
       run:
         working-directory: ./e2e
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
       with:
         node-version: 18
     - name: Build
@@ -31,13 +34,13 @@ jobs:
       run: npx playwright install --with-deps
     - name: Run Playwright tests
       run: npx playwright test
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
       if: always()
       with:
         name: playwright-report
         path: ./e2e/playwright-report/
         retention-days: 30
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
       if: always()
       with:
         name: server-logs
@@ -61,12 +64,12 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
-          go-version: '1.23'
+          go-version: "${{ env.GO_VERSION }}"
 
       - name: Run tests
         env:
@@ -78,43 +81,73 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
-          go-version: '1.23'
+          go-version: "${{ env.GO_VERSION }}"
       - uses: mattermost/actions/plugin-ci/lint@main
 
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC authentication with Chainguard identity
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
       - uses: mattermost/actions/plugin-ci/setup@main
         with:
           golang-ci-lint-version: "v1.54.2"
-          golang-version: "1.23"
-      - uses: mattermost/actions/plugin-ci/build@main
+          golang-version: "${{ env.GO_VERSION }}"
+      
+      - name: ci/setup-chainctl
+        uses: chainguard-dev/setup-chainctl@v0.3.2
+        with:
+          identity: ${{ secrets.CHAINGUARD_IDENTITY }}
+      
+      - name: ci/setup-build-tools
+        run: |
+          echo "Setting up build tools..."
+          mkdir -p build/bin
+          cd build/manifest && go build -o ../bin/manifest
+          cd ../pluginctl && go build -o ../bin/pluginctl
+      
+      - name: ci/build-both-distributions
+        env:
+          GO_VERSION: ${{ env.GO_VERSION }}
+        run: make dist-all
+      
+      - name: ci/upload-all-artifacts
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        with:
+          name: all-plugin-artifacts
+          path: |
+            dist/*.tar.gz
+            dist-fips/*.tar.gz
+          retention-days: 7
 
   deploy:
     needs: [lint, build, plugin-tests, e2e]
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Build plugin
-        run: make dist
+      - name: Download build artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: all-plugin-artifacts
+          path: artifacts/
 
       - name: Update latest-master release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PLUGIN_FILE=$(ls dist/*.tar.gz)
           # Get the commit message and hash
           COMMIT_MSG=$(git log -1 --pretty=%B)
           COMMIT_HASH=$(git rev-parse --short HEAD)
@@ -130,17 +163,19 @@ jobs:
           git tag latest-master
           git push origin latest-master
 
+          # Upload both normal and FIPS plugin bundles
           gh release create latest-master \
             --title "Latest Master Build" \
             --notes "Latest build from master branch - ${COMMIT_HASH}" \
             --prerelease \
-            $PLUGIN_FILE
+            artifacts/dist/*.tar.gz \
+            artifacts/dist-fips/*.tar.gz
 
       - name: Deploy to Mattermost instances
         env:
           MM_SERVERS_CONFIG: ${{ secrets.MM_SERVERS_CONFIG }}
         run: |
-          PLUGIN_FILE=$(ls dist/*.tar.gz)
+          PLUGIN_FILE=$(ls artifacts/dist/*.tar.gz | head -1)
           echo "Found plugin bundle: $PLUGIN_FILE"
 
           echo "$MM_SERVERS_CONFIG" | jq -c '.[]' | while read -r server; do
