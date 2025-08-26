@@ -17,7 +17,18 @@ const (
 	EventTypeError
 	// EventTypeToolCalls represents a tool call event
 	EventTypeToolCalls
+	// EventTypeUsage represents token usage data
+	EventTypeUsage
 )
+
+// TokenUsage represents token usage statistics for an LLM request
+// Unified structure that works across OpenAI and Anthropic APIs
+type TokenUsage struct {
+	// Core token counts (present in both APIs)
+	InputTokens  int `json:"input_tokens"`  // PromptTokens (OpenAI) / InputTokens (Anthropic)
+	OutputTokens int `json:"output_tokens"` // CompletionTokens (OpenAI) / OutputTokens (Anthropic)
+	TotalTokens  int `json:"total_tokens"`  // Sum or direct from API
+}
 
 // TextStreamEvent represents an event in the text stream
 type TextStreamEvent struct {

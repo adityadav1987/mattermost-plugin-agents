@@ -244,6 +244,10 @@ type ToolBufferElement struct {
 
 func (s *OpenAI) streamResultToChannels(request openaiClient.ChatCompletionRequest, llmContext *llm.Context, output chan<- llm.TextStreamEvent) {
 	request.Stream = true
+	// Enable usage tracking in streaming
+	request.StreamOptions = &openaiClient.StreamOptions{
+		IncludeUsage: true,
+	}
 
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
@@ -315,6 +319,19 @@ func (s *OpenAI) streamResultToChannels(request openaiClient.ChatCompletionReque
 
 		// Ping the watchdog when we receive a response
 		watchdog <- struct{}{}
+
+		// Check for usage data and emit usage event if available
+		if response.Usage != nil {
+			usage := llm.TokenUsage{
+				InputTokens:  response.Usage.PromptTokens,
+				OutputTokens: response.Usage.CompletionTokens,
+				TotalTokens:  response.Usage.TotalTokens,
+			}
+			output <- llm.TextStreamEvent{
+				Type:  llm.EventTypeUsage,
+				Value: usage,
+			}
+		}
 
 		if len(response.Choices) == 0 {
 			continue

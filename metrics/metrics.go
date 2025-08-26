@@ -48,7 +48,9 @@ type metrics struct {
 	httpRequestsTotal prometheus.Counter
 	httpErrorsTotal   prometheus.Counter
 
-	llmRequestsTotal *prometheus.CounterVec
+	llmRequestsTotal     *prometheus.CounterVec
+	llmInputTokensTotal  *prometheus.CounterVec
+	llmOutputTokensTotal *prometheus.CounterVec
 }
 
 // NewMetrics Factory method to create a new metrics collector.
@@ -129,6 +131,24 @@ func NewMetrics(info InstanceInfo) Metrics {
 	}, []string{"llm_name"})
 	m.registry.MustRegister(m.llmRequestsTotal)
 
+	m.llmInputTokensTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace:   MetricsNamespace,
+		Subsystem:   MetricsSubsystemLLM,
+		Name:        "input_tokens_total",
+		Help:        "The total number of input tokens used by LLM requests.",
+		ConstLabels: additionalLabels,
+	}, []string{"user_id", "team_id", "llm_name"})
+	m.registry.MustRegister(m.llmInputTokensTotal)
+
+	m.llmOutputTokensTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace:   MetricsNamespace,
+		Subsystem:   MetricsSubsystemLLM,
+		Name:        "output_tokens_total",
+		Help:        "The total number of output tokens used by LLM requests.",
+		ConstLabels: additionalLabels,
+	}, []string{"user_id", "team_id", "llm_name"})
+	m.registry.MustRegister(m.llmOutputTokensTotal)
+
 	return m
 }
 
@@ -160,20 +180,46 @@ func (m *metrics) GetMetricsForAIService(llmName string) *llmMetrics {
 	}
 
 	return &llmMetrics{
-		llmRequestsTotal: m.llmRequestsTotal.MustCurryWith(prometheus.Labels{"llm_name": llmName}),
+		llmRequestsTotal:     m.llmRequestsTotal.MustCurryWith(prometheus.Labels{"llm_name": llmName}),
+		llmInputTokensTotal:  m.llmInputTokensTotal.MustCurryWith(prometheus.Labels{"llm_name": llmName}),
+		llmOutputTokensTotal: m.llmOutputTokensTotal.MustCurryWith(prometheus.Labels{"llm_name": llmName}),
+		llmName:              llmName,
 	}
 }
 
 type LLMetrics interface {
 	IncrementLLMRequests()
+	IncrementInputTokens(userID, teamID string, count int)
+	IncrementOutputTokens(userID, teamID string, count int)
 }
 
 type llmMetrics struct {
-	llmRequestsTotal *prometheus.CounterVec
+	llmRequestsTotal     *prometheus.CounterVec
+	llmInputTokensTotal  *prometheus.CounterVec
+	llmOutputTokensTotal *prometheus.CounterVec
+	llmName              string
 }
 
 func (m *llmMetrics) IncrementLLMRequests() {
 	if m != nil {
 		m.llmRequestsTotal.With(prometheus.Labels{}).Inc()
+	}
+}
+
+func (m *llmMetrics) IncrementInputTokens(userID, teamID string, count int) {
+	if m != nil {
+		m.llmInputTokensTotal.With(prometheus.Labels{
+			"user_id": userID,
+			"team_id": teamID,
+		}).Add(float64(count))
+	}
+}
+
+func (m *llmMetrics) IncrementOutputTokens(userID, teamID string, count int) {
+	if m != nil {
+		m.llmOutputTokensTotal.With(prometheus.Labels{
+			"user_id": userID,
+			"team_id": teamID,
+		}).Add(float64(count))
 	}
 }

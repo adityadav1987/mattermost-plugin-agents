@@ -14,6 +14,7 @@ import (
 	"github.com/mattermost/mattermost-plugin-ai/config"
 	"github.com/mattermost/mattermost-plugin-ai/enterprise"
 	"github.com/mattermost/mattermost-plugin-ai/llm"
+	"github.com/mattermost/mattermost-plugin-ai/metrics"
 	"github.com/mattermost/mattermost-plugin-ai/mmapi"
 	"github.com/mattermost/mattermost-plugin-ai/openai"
 	"github.com/mattermost/mattermost-plugin-ai/subtitles"
@@ -39,18 +40,20 @@ type MMBots struct {
 	licenseChecker         *enterprise.LicenseChecker
 	config                 Config
 	llmUpstreamHTTPClient  *http.Client
+	metrics                metrics.Metrics
 
 	botsLock sync.RWMutex
 	bots     []*Bot
 }
 
-func New(mutexPluginAPI cluster.MutexPluginAPI, pluginAPI *pluginapi.Client, licenseChecker *enterprise.LicenseChecker, config Config, llmUpstreamHTTPClient *http.Client) *MMBots {
+func New(mutexPluginAPI cluster.MutexPluginAPI, pluginAPI *pluginapi.Client, licenseChecker *enterprise.LicenseChecker, config Config, llmUpstreamHTTPClient *http.Client, metrics metrics.Metrics) *MMBots {
 	return &MMBots{
 		ensureBotsClusterMutex: mutexPluginAPI,
 		pluginAPI:              pluginAPI,
 		licenseChecker:         licenseChecker,
 		config:                 config,
 		llmUpstreamHTTPClient:  llmUpstreamHTTPClient,
+		metrics:                metrics,
 	}
 }
 
@@ -188,6 +191,12 @@ func (b *MMBots) getLLM(serviceConfig llm.ServiceConfig) llm.LanguageModel {
 
 	// Truncation Support
 	result = llm.NewLLMTruncationWrapper(result)
+
+	// Token Usage Tracking
+	if b.metrics != nil {
+		llmMetrics := b.metrics.GetMetricsForAIService(serviceConfig.Type)
+		result = llm.NewTokenTrackingWrapper(result, llmMetrics)
+	}
 
 	// Logging
 	if b.config.EnableLLMLogging() {

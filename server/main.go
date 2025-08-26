@@ -77,7 +77,7 @@ func (p *Plugin) OnActivate() error {
 		p.configuration.Update(&newCfg)
 	}
 
-	bots := bots.New(p.API, pluginAPI, licenseChecker, &p.configuration, llmUpstreamHTTPClient)
+	bots := bots.New(p.API, pluginAPI, licenseChecker, &p.configuration, llmUpstreamHTTPClient, metricsService)
 	p.configuration.RegisterUpdateListener(func() {
 		if ensureErr := bots.EnsureBots(p.configuration.GetBots()); ensureErr != nil {
 			pluginAPI.Log.Error("failed to ensure bots on configuration update", "error", ensureErr)
